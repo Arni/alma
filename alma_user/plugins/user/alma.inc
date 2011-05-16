@@ -60,12 +60,18 @@ function alma_user_user_authenticate($name, $pass) {
   $return['user'] = array(
     'display_name' => $info['user_name'],
     'auth_mail' => '',
+    'alma_prefered_branch' => '',
   );
 
 
   if (isset($info['mails'][0]) && valid_email_address($info['mails'][0]['mail'])) {
     $return['user']['auth_mail'] = $info['mails'][0]['mail'];
   }
+
+  //In order to update prefered branch if changed in the Library System
+   if (isset($info['preferences']['patron_branch'])) {
+      $return['user']['alma_prefered_branch'] = $info['preferences']['patron_branch'];
+   }
 
   return $return;
 }
@@ -125,7 +131,7 @@ function alma_user_user_library_settings_form(&$form_state, $account) {
       '183'        => t('Six months'),
       '365'        => t('A year'),
     ),
-    '#default_value' => (isset($account->interest_period) && $account->interest_period > 10) ? $account->interest_period : ALMA_USER_DEFAULT_INTEREST_PERIOD,
+    '#default_value' => (isset($account->interest_period) && $account->interest_period > 10) ? $account->interest_period : 365,
   );
 
   $form['suspend_start'] = array(
@@ -228,4 +234,33 @@ function alma_user_user_password_change($account, $new_password) {
   }
 
   return alma_client_invoke('change_pin', $creds['user_id'], $creds['password'], $new_password);
+}
+
+
+/**
+ * Updates prefered branch on login. User can new to the Ding or has had his prefered branch updated in the
+ * libary system
+ * @param <type> $user : a copy of the user object
+ */
+function alma_user_user_authenticate_finalize($user) {
+    if (isset($user->alma_prefered_branch) && !empty($user->alma_prefered_branch) && $user->preferred_branch != $user->alma_prefered_branch ) {
+        $updates = array();
+        $updates['preferred_branch'] = $user->alma_prefered_branch;
+        user_save($user, $updates);
+        set_prefered_branch($user->uid, $user->alma_prefered_branch);
+    }
+   
+}
+
+/**
+ * Sets the prefered branch on the global user
+ * @global <type> $user
+ * @param <type> $uid
+ * @param <type> $prefered_branch
+ */
+function set_prefered_branch ($uid, $prefered_branch) {
+    global $user;
+    if ($user->uid == $uid) {
+       $user->preferred_branch = $prefered_branch;
+    }
 }

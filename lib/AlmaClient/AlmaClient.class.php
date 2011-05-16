@@ -77,9 +77,13 @@ class AlmaClient {
       // Since we currently have no neat for the more advanced stuff
       // SimpleXML provides, we'll just use DOM, since that is a lot
       // faster in most cases.
+        
       $doc = new DOMDocument();
       $doc->loadXML($request->data);
-      if (!$check_status || $doc->getElementsByTagName('status')->item(0)->getAttribute('value') == 'ok') {
+
+      //Randersfix if sætningen blev ikke ramt fordi alma returnerer status ok
+      if (!$check_status || ($doc->getElementsByTagName('status')->item(0)->getAttribute('value') == 'ok'
+              && $doc->getElementsByTagName('status')->item(0)->getAttribute('key') != 'reservationNotFound')) {
         return $doc;
       }
       else {
@@ -281,11 +285,16 @@ class AlmaClient {
     }
 
     foreach ($info->getElementsByTagName('phoneNumber') as $phone) {
-      $data['phones'][] = array(
+      $phone = array(
         'id' => $phone->getAttribute('id'),
         'phone' => $phone->getAttribute('localCode'),
         'sms' => (bool) ($phone->getElementsByTagName('sms')->item(0)->getAttribute('useForSms') == 'yes'),
       );
+      //Randersfix. Hvis låneren har udfyldt et telefonnummer ud over mobiltelefon udleveres det først.
+      // Vi skal bruge mobiltelefonnummeret som bruges til sms'er så derfor placerer det først.
+      if ($phone['sms']) {
+          $data['phones'][] = $phone;
+      } 
     }
 
     if ($prefs = $info->getElementsByTagName('patronPreferences')->item(0)) {
@@ -331,7 +340,11 @@ class AlmaClient {
         'organisation_id' => $item->getAttribute('organisationId'),
         'record_id' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('id'),
         'record_available' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('isAvailable'),
+        
       );
+      if ($item->getElementsByTagName('note')->length > 0) {
+        $reservation['note'] = $item->getElementsByTagName('note')->item(0)->getAttribute('value');
+      }
 
       if ($reservation['status'] == 'fetchable') {
         $reservation['pickup_number'] = (integer) $item->getAttribute('pickUpNo');
@@ -369,6 +382,9 @@ class AlmaClient {
         'record_id' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('id'),
         'record_available' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('isAvailable'),
       );
+      if ($item->getElementsByTagName('note')->length > 0) {
+        $loans[$id]['note'] = $item->getElementsByTagName('note')->item(0)->getAttribute('value');
+      }
     }
     uasort($loans, 'AlmaClient::loan_sort');
     return $loans;
@@ -440,6 +456,7 @@ class AlmaClient {
 
     try {
       $doc = $this->request('patron/reservations/add', $params);
+
     }
     catch (AlmaClientReservationNotFound $e) {
       return FALSE;
@@ -750,7 +767,24 @@ class AlmaClient {
     return $data;
   }
 
-  /**
+    /**
+   * Get availability data for one or more records from ADHL. We may not have all the records.
+   */
+  public function get_availability_adhl($alma_ids) {
+        $data = array();
+        $status = array('periodical', 'availableForLoan', 'checkedOut');
+        $doc = $this->request('catalogue/availability', array('catalogueRecordKey' => $alma_ids));
+        foreach ($doc->getElementsByTagName('catalogueRecord') as $record) {
+            if ($record->getAttribute('availabilityInformation') && in_array($record->getAttribute('availabilityInformation'), $status )) {
+                $data[$record->getAttribute('id')] = TRUE;
+            } else {
+                $data[$record->getAttribute('id')] = FALSE;
+            }
+        }
+        return $data;
+    }
+
+    /**
    * Pay debts.
    */
   public function add_payment($debt_ids, $order_id = NULL) {

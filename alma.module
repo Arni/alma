@@ -88,7 +88,6 @@ function alma_client_invoke($method) {
     }
   }
   $client = alma_client();
-
   try {
     $result = call_user_func_array(array($client, $method), $args);
   }

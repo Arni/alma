@@ -201,6 +201,13 @@ function alma_user_preprocess_ding_library_user_personal_info(&$vars) {
       $vars[$field] = $info['addresses'][0][$field] ? check_plain($info['addresses'][0][$field]) : '';
     }
 
+    //Randersfix. Hvis låneren har udfyldt et telefonnummer ud over mobiltelefon udleveres det først.
+    // Vi skal bruge mobiltelefonnummeret som bruges til sms'er.
+//    foreach ($info['phones'] As $phone) {
+//        if ($phone['sms']) {
+//            $vars['phone'] = check_plain ($phone['phone']);
+//        }
+//    }
     $vars['phone'] = $info['phones'][0]['phone'] ? check_plain($info['phones'][0]['phone']) : '';
   }
 }
