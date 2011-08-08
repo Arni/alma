@@ -1,17 +1,15 @@
 <?php
-// $Id$
+/**
+ * @file
+ * Provides a client for the Axiell Alma library information webservice.
+ */
 
 define('ALMA_SERVICE_TYPE_DUE_DATE_ALERT', 'dueDateAlert');
 define('ALMA_SERVICE_TYPE_LIBRARY_MESSAGE', 'libraryMessage');
 define('ALMA_SERVICE_TYPE_OVERDUE_NOTICE', 'overdueNotice');
 define('ALMA_SERVICE_TYPE_PICK_UP_NOTICE', 'pickUpNotice');
-
 define('ALMA_SERVICE_METHOD_SMS', 'sms');
 
-/**
- * @file AlmaClient.php
- * Provides a client for the Axiell Alma library information webservice.
- */
 class AlmaClient {
   /**
    * @var AlmaClientBaseURL
@@ -37,7 +35,7 @@ class AlmaClient {
       throw new Exception('Invalid base URL: ' . $base_url);
     }
 
-    self::$salt = rand();
+    self::$salt = mt_rand();
   }
 
   /**
@@ -67,23 +65,28 @@ class AlmaClient {
     if (variable_get('alma_enable_logging', FALSE)) {
     	$seconds = floatval(($stopTime[1]+$stopTime[0]) - ($startTime[1]+$startTime[0]));
 
-      $log_params = self::filter_request_params($params);
+      // Filter params to avoid logging sensitive data.
+      // This can be disabled by setting alma_logging_filter_params = 0. There is no UI for setting this variable
+      // It is intended for settings.php in development environments only.
+      $params = (variable_get('alma_logging_filter_params', 1)) ? self::filter_request_params($params) : $params;
 
       // Log the request
-      watchdog('alma', 'Sent request: @url (@seconds s)', array('@url' => url($this->base_url . $method, array('query' => $log_params)), '@seconds' => $seconds), WATCHDOG_DEBUG);
+      watchdog('alma', 'Sent request: @url (@seconds s)', array('@url' => url($this->base_url . $method, array('query' => $params)), '@seconds' => $seconds), WATCHDOG_DEBUG);
     }
 
     if ($request->code == 200) {
-      // Since we currently have no neat for the more advanced stuff
+      // Since we currently have no need for the more advanced stuff
       // SimpleXML provides, we'll just use DOM, since that is a lot
       // faster in most cases.
-        
       $doc = new DOMDocument();
       $doc->loadXML($request->data);
-
       //Randersfix if sætningen blev ikke ramt fordi alma returnerer status ok
-      if (!$check_status || ($doc->getElementsByTagName('status')->item(0)->getAttribute('value') == 'ok'
-              && $doc->getElementsByTagName('status')->item(0)->getAttribute('key') != 'reservationNotFound')) {
+      //TodoCheck if still a problem
+//     if (!$check_status || ($doc->getElementsByTagName('status')->item(0)->getAttribute('value') == 'ok'
+//           && $doc->getElementsByTagName('status')->item(0)->getAttribute('key') != 'reservationNotFound')) {
+//      return $doc;
+//      }
+      if (!$check_status || $doc->getElementsByTagName('status')->item(0)->getAttribute('value') == 'ok') {
         return $doc;
       }
       else {
@@ -285,17 +288,12 @@ class AlmaClient {
     }
 
     foreach ($info->getElementsByTagName('phoneNumber') as $phone) {
-      $phone = array(
+      $data['phones'][] = array(
         'id' => $phone->getAttribute('id'),
         'phone' => $phone->getAttribute('localCode'),
         'sms' => (bool) ($phone->getElementsByTagName('sms')->item(0)->getAttribute('useForSms') == 'yes'),
       );
-      //Randersfix. Hvis låneren har udfyldt et telefonnummer ud over mobiltelefon udleveres det først.
-      // Vi skal bruge mobiltelefonnummeret som bruges til sms'er så derfor placerer det først.
-      if ($phone['sms']) {
-          $data['phones'][] = $phone;
       } 
-    }
 
     if ($prefs = $info->getElementsByTagName('patronPreferences')->item(0)) {
       $data['preferences'] = array(
@@ -340,10 +338,10 @@ class AlmaClient {
         'organisation_id' => $item->getAttribute('organisationId'),
         'record_id' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('id'),
         'record_available' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('isAvailable'),
-        
       );
-      if ($item->getElementsByTagName('note')->length > 0) {
-        $reservation['note'] = $item->getElementsByTagName('note')->item(0)->getAttribute('value');
+        
+      if ($note = $item->getElementsByTagName('note')->item(0)) {
+        $reservation['notes'] = $note->getAttribute('value');
       }
 
       if ($reservation['status'] == 'fetchable') {
@@ -373,7 +371,7 @@ class AlmaClient {
     $loans = array();
     foreach ($doc->getElementsByTagName('loan') as $item) {
       $id = $item->getAttribute('id');
-      $loans[$id] = array(
+      $loan = array(
         'id' => $id,
         'branch' => $item->getAttribute('loanBranch'),
         'loan_date' => $item->getAttribute('loanDate'),
@@ -383,8 +381,9 @@ class AlmaClient {
         'record_available' => $item->getElementsByTagName('catalogueRecord')->item(0)->getAttribute('isAvailable'),
       );
       if ($item->getElementsByTagName('note')->length > 0) {
-        $loans[$id]['note'] = $item->getElementsByTagName('note')->item(0)->getAttribute('value');
+        $loan['notes'] = $item->getElementsByTagName('note')->item(0)->getAttribute('value');
       }
+      $loans[$id] = $loan;
     }
     uasort($loans, 'AlmaClient::loan_sort');
     return $loans;
@@ -436,9 +435,7 @@ class AlmaClient {
     $params = array(
       'borrCard' => $borr_card,
       'pinCode' => $pin_code,
-      // Axiell requires URLs to be ISO-8859-1. If you're having strange
-      // bugs, you could ostensibly blame this conversion.
-      'reservable' => utf8_decode($reservation['id']),
+      'reservable' => $reservation['id'],
       'reservationPickUpBranch' => $reservation['pickup_branch'],
       'reservationValidFrom' => $reservation['valid_from'],
       'reservationValidTo' => $reservation['valid_to'],
@@ -456,7 +453,18 @@ class AlmaClient {
 
     try {
       $doc = $this->request('patron/reservations/add', $params);
+      $res_status = $doc->getElementsByTagName('reservationStatus')->item(0)->getAttribute('value');
+      $res_message = $doc->getElementsByTagName('reservationStatus')->item(0)->getAttribute('key');
 
+      // Return error code when patron is blocked.
+      if ($res_message == 'reservationPatronBlocked') {
+        return DING_PROVIDER_AUTH_BLOCKED;
+    }
+
+      // General catchall if status is not okay is to report failure.
+      if ($res_status == 'reservationNotOk') {
+        return FALSE;
+      }
     }
     catch (AlmaClientReservationNotFound $e) {
       return FALSE;
@@ -516,8 +524,33 @@ class AlmaClient {
       'pinCode' => $pin_code,
       'loans' => (is_array($loan_ids)) ? join(',', $loan_ids) : $loan_ids,
     );
+
     $doc = $this->request('patron/loans/renew', $params);
-    return TRUE;
+
+    //Built return array as specified by Ding loan provider.
+    //See ding_provider_example_loan_renew_loans().
+    $reservations = array();
+    foreach ($doc->getElementsByTagName('loan') as $loan) {
+      $id = $loan->getAttribute('id');
+      if (in_array($id, $loan_ids)) {
+        if ($renewable = $loan->getElementsByTagName('loanIsRenewable')->item(0)) {
+          $message = $renewable->getAttribute('message');
+          $renewable = $renewable->getAttribute('value');
+          //If message is "isRenewedToday" we assumme that the renewal is successful.
+          //Even if this is not the case any error in the current renewal is irrelevant
+          //as the loan has previously been renewed so don't report it as such
+          if ($message == 'isRenewedToday') {
+            $reservations[$id] = TRUE;
+          } elseif ($message == 'maxNofRenewals') {
+            $reservations[$id] = t('Maximum number of renewals reached');
+          } elseif (!$renewable) {
+            $reservations[$id] = t('Unable to renew material');
+  }
+        }
+      }
+    }
+
+    return $reservations;
   }
 
   /**
@@ -943,6 +976,41 @@ class AlmaClient {
 
     $doc = $this->request('patron/messageServices/remove', $params);
     return TRUE;
+  }
+
+   /**
+   * Searches in the DDELibra LMS. Returnes ids from the search result
+   *
+   * @param string $search_text
+   *    Search string in CCL
+   * @param string $search_type
+   *   One of  native | fullText | namedList. Native is the DDLibra's native search language (CCL)
+   * @param $start_no
+   *    Where in the search result to start returning the asked for number of records.
+   * @param $number_of_records
+   *    Number of returned records
+   */
+  public function run_lms_search($search_text, $search_type = 'native', $start_no = 1, $number_of_records = 30) {
+    $params = array(
+      'searchText' => $search_text,
+      'searchType' => $search_type,
+      'startNo' => $start_no,
+      'nofRecords' => $number_of_records
+    );
+    $doc = $this->request('catalogue/fulltextsearch', $params, FALSE);
+    $data = array(
+      'request_status' => $doc->getElementsByTagName('status')->item(0)->getAttribute('value'),
+      'number_of_records' => $doc->getElementsByTagName('nofRecords')->item(0)->nodeValue,
+      'number_of_records_total' => $doc->getElementsByTagName('nofRecordsTotal')->item(0)->nodeValue,
+      'start_number' => $doc->getElementsByTagName('startNo')->item(0)->nodeValue,
+      'stop_number' => $doc->getElementsByTagName('stopNo')->item(0)->nodeValue,
+      'alma_ids' => array(),
+    );
+    foreach ($doc->getElementsByTagName('catalogueRecord') as $elem) {
+      $data['alma_ids'][] = $elem->getAttribute('id');
+    }
+
+    return $data;
   }
 
 }
