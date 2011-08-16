@@ -65,9 +65,9 @@ function alma_user_user_authenticate($name, $pass) {
   }
 
   // Set preferred branch from alam (used to check if the drupal user should be updated).
-  if (isset($info['preferences']['patron_branch'])) {
+   if (isset($info['preferences']['patron_branch'])) {
     $return['user']['alma_preferred_branch'] = $info['preferences']['patron_branch'];
-  }
+   }
 
   return $return;
 }

@@ -76,6 +76,8 @@ function alma_user_reservation_list($user) {
     $org_cache = alma_get_organisation();
   }
   $reservations = alma_client_invoke('get_reservations', $creds['user_id'], $creds['password']);
+    //Randersfix $reservations er null hvis bruger ikke er låner
+  if ($reservations && is_array($reservations)) {
   foreach ($reservations as $key => &$reservation) {
     // Remote reservations have negative IDs (undocumented Axiell "feature").
     if ($reservation['id'] < 0) {
@@ -84,6 +86,7 @@ function alma_user_reservation_list($user) {
     $reservation['pickup_branch_id'] = $reservation['pickup_branch'];
     $reservation['pickup_branch'] = $org_cache['branch'][$reservation['pickup_branch']];
   }
+    }
   return $reservations;
 }
 

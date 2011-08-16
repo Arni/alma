@@ -69,10 +69,10 @@ function alma_client() {
     // don't know, but I've seen it happen on the user page.
     require_once($path . '/lib/AlmaClient/AlmaClient.class.php');
     try {
-      $client = new AlmaClient(variable_get('alma_base_url', ''));
-    }
+    $client = new AlmaClient(variable_get('alma_base_url', ''));
+  }
     catch (Exception $e) {
-      watchdog('alma', 'Error instantiating AlmaClient: “@message”', array('@method' => $method, '@message' => $e->getMessage(), WATCHDOG_ERROR));
+      watchdog('alma', 'Error instantiating AlmaClient: "@message"', array('@method' => $method, '@message' => $e->getMessage(), WATCHDOG_ERROR));
       return NULL;
     }
   }

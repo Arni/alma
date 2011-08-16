@@ -1,5 +1,6 @@
 <?php
 
+
 /**
  * @file alma_user.install
  * Installation and upgrade hooks for the alma_user module.
