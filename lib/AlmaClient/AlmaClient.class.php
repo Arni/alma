@@ -952,6 +952,40 @@ class AlmaClient {
     return TRUE;
   }
 
+	/**
+	* Searches in the DDELibra LMS. Returnes ids from the search result
+	*
+	* @param string $search_text
+	*    Search string in CCL
+	* @param string $search_type
+	*   One of  native | fullText | namedList. Native is the DDLibra's native search language (CCL)
+	* @param $start_no
+	*    Where in the search result to start returning the asked for number of records.
+	* @param $number_of_records
+	*    Number of returned records
+	*/
+	public function run_lms_search($search_text, $search_type = 'native', $start_no = 1, $number_of_records = 30) {
+		$params = array(
+			'searchText' => $search_text,
+			'searchType' => $search_type,
+			'startNo' => $start_no,
+			'nofRecords' => $number_of_records
+			);
+		$doc = $this->request('catalogue/fulltextsearch', $params, FALSE);
+		$data = array(
+			'request_status' => $doc->getElementsByTagName('status')->item(0)->getAttribute('value'),
+			'number_of_records' => $doc->getElementsByTagName('nofRecords')->item(0)->nodeValue,
+			'number_of_records_total' => $doc->getElementsByTagName('nofRecordsTotal')->item(0)->nodeValue,
+			'start_number' => $doc->getElementsByTagName('startNo')->item(0)->nodeValue,
+			'stop_number' => $doc->getElementsByTagName('stopNo')->item(0)->nodeValue,
+			'alma_ids' => array(),
+			);
+		foreach ($doc->getElementsByTagName('catalogueRecord') as $elem) {
+			$data['alma_ids'][] = $elem->getAttribute('id');
+		}
+
+		return $data;
+	}
 }
 
 /**
