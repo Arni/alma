@@ -250,6 +250,54 @@ function alma_user_debt_dibs_add_payment($transaction) {
     watchdog('alma_user', 'No session in add payment. Transaction: @transaction', array('@transaction' => print_r($transaction, TRUE)), WATCHDOG_EMERG);
   }
   else {
+			try
+			{
     alma_client_invoke('add_payment', implode(',', $transaction['params']['selected_debts']), $transaction['payment_order_id']);
+
+				//Randersfix - Confirm payment
+				$confirmation = alma_client_invoke('confirm_payment', $transaction['payment_order_id']);
+				send_mail ($confirmation) ;
   }
+			catch (Exception $e)
+			{
+				watchdog('alma_user', 'Update of payment in alma failed Transaction: @transaction', array('@transaction' => print_r($transaction, TRUE)), WATCHDOG_ERROR);
+				send_mail_error ($transaction);
+				throw $e;
 }
+
+		}
+	}
+
+	function alma_user_mail($key, &$message, $params) {
+		switch ($key) {
+			case 'dibs':
+				// note: data can be passed to this function in the $params array
+				$message['subject'] = $params['subject'];
+				$message['body'] = $params['body'];
+				break;
+		}
+	}
+
+	function send_mail ($confirmation) {
+		if ($confirmation)
+		{
+			if ($confirmation["success"]) {
+				$params['subject'] = "Dibs betaling - opdatering lykkedes";
+			} else
+			{
+				$params['subject'] = "Dibs betaling - opdatering fejlede";
+			}
+			$params['body'] = "Ordre: " . $confirmation['order_id'] . "\n\n";
+			$params['body'] .=  $confirmation['data'];
+			drupal_mail('alma_user', 'dibs', 'al@randersbib.dk', language_default(), $params);
+		}
+	}
+
+	function send_mail_error ($transaction) {
+		if ($transaction)
+		{
+			$params['subject'] = "Dibs betaling - opdatering throws exception";
+			$params['body'] = "Ordre: " . $transaction['payment_order_id'] . "\n\n";
+			drupal_mail('alma_user', 'dibs', 'al@randersbib.dk', language_default(), $params);
+		}
+	}
